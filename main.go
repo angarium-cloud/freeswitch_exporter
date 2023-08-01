@@ -33,13 +33,14 @@ func main() {
 			"web.config",
 			"[EXPERIMENTAL] Path to config yaml file that can enable TLS or authentication.",
 		).Default("").String()
+		rtpEnable = kingpin.Flag("rtp.enable", "enable rtp info, default: fasle").Default("false").Bool()
 	)
 	promlogConfig := &promlog.Config{}
 	kingpin.Version("freeswitch_exporter")
 	logger := promlog.New(promlogConfig)
 	kingpin.Parse()
 
-	c, err := NewCollector(*scrapeURI, *timeout, *password)
+	c, err := NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
 
 	if err != nil {
 		panic(err)
