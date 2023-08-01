@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/textproto"
 	"net/url"
@@ -24,9 +23,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/promlog"
 	"golang.org/x/net/html/charset"
 )
 
@@ -43,6 +42,7 @@ type Collector struct {
 	url   *url.URL
 	mutex sync.Mutex
 
+	logger        log.Logger
 	up            prometheus.Gauge
 	failedScrapes prometheus.Counter
 	totalScrapes  prometheus.Counter
@@ -177,13 +177,14 @@ var (
 )
 
 // New processes uri, timeout and methods and returns a new Collector.
-func New(uri string, timeout time.Duration, password string, rtpEnable bool) (*Collector, error) {
+func New(uri string, timeout time.Duration, password string, rtpEnable bool, logger log.Logger) (*Collector, error) {
 	var c Collector
 
 	c.URI = uri
 	c.Timeout = timeout
 	c.Password = password
 	c.rtpEnable = rtpEnable
+	c.logger = logger
 
 	var url *url.URL
 	var err error
@@ -312,8 +313,6 @@ func (c *Collector) scapeMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
-	promlogConfig := &promlog.Config{}
-	logger := promlog.New(promlogConfig)
 	response, err := c.fsCommand("api xml_locate configuration configuration name modules.conf")
 
 	if err != nil {
@@ -325,9 +324,10 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&cfgs)
 	if err != nil {
-		log.Println("error: &cfgs", err)
+		msgStr := fmt.Sprintf("Configuration decode error: %s", err)
+		level.Warn(c.logger).Log("msg", msgStr)
 	}
-	level.Debug(logger).Log("[response]:", &cfgs)
+	level.Debug(c.logger).Log("[response]:", &cfgs)
 	fsLoadModules := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "freeswitch_load_module",
@@ -349,7 +349,7 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 		if string(status) == "true" {
 			loadModule = 1
 		}
-		level.Debug(logger).Log("module", m.Module, " load status: ", string(status))
+		level.Debug(c.logger).Log("module", m.Module, " load status: ", string(status))
 		fsLoadModules.WithLabelValues(m.Module).Set(float64(loadModule))
 	}
 	fsLoadModules.MetricVec.Collect(ch)
@@ -357,8 +357,6 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
-	promlogConfig := &promlog.Config{}
-	logger := promlog.New(promlogConfig)
 	response, err := c.fsCommand("api sofia xmlstatus gateway")
 
 	if err != nil {
@@ -371,15 +369,16 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&gw)
 	if err != nil {
-		log.Println("error: &gw", err)
+		msgStr := fmt.Sprintf("Gateways decode error: %s", err)
+		level.Warn(c.logger).Log("msg", msgStr)
 	}
-	level.Debug(logger).Log("[response]:", &gw)
+	level.Debug(c.logger).Log("[response]:", &gw)
 	for _, gateway := range gw.Gateway {
 		status := 0
 		if gateway.Status == "UP" {
 			status = 1
 		}
-		level.Debug(logger).Log("sofia ", gateway.Name, " status:", status)
+		level.Debug(c.logger).Log("sofia ", gateway.Name, " status:", status)
 		fsStatus, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_status", "freeswitch gateways status", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile, "context": gateway.Context, "scheme": gateway.Scheme}),
 			prometheus.GaugeValue,
@@ -506,8 +505,6 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
-	promlogConfig := &promlog.Config{}
-	logger := promlog.New(promlogConfig)
 	response, err := c.fsCommand("api show endpoint as xml")
 
 	if err != nil {
@@ -518,9 +515,10 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&rt)
 	if err != nil {
-		log.Println("error: &rt", err)
+		msgStr := fmt.Sprintf("Result decode error: %s", err)
+		level.Warn(c.logger).Log("msg", msgStr)
 	}
-	level.Debug(logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("[response]:", &rt)
 	for _, ep := range rt.Row {
 		endpointLoad, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_endpoint_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": ep.Type.Text, "name": ep.Name.Text, "ikey": ep.Ikey.Text}),
@@ -538,8 +536,6 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
-	promlogConfig := &promlog.Config{}
-	logger := promlog.New(promlogConfig)
 	response, err := c.fsCommand("api show codec as xml")
 
 	if err != nil {
@@ -550,9 +546,10 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&rt)
 	if err != nil {
-		log.Println("error: &rt", err)
+		msgStr := fmt.Sprintf("Result decode error: %s", err)
+		level.Warn(c.logger).Log("msg", msgStr)
 	}
-	level.Debug(logger).Log("[response]:", &rt)
+	level.Debug(c.logger).Log("[response]:", &rt)
 	for _, cc := range rt.Row {
 		codecLoad, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_codec_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": cc.Type.Text, "name": cc.Name.Text, "ikey": cc.Ikey.Text}),
@@ -570,8 +567,6 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
-	promlogConfig := &promlog.Config{}
-	logger := promlog.New(promlogConfig)
 	response, err := c.fsCommand("api verto xmlstatus")
 
 	if err != nil {
@@ -582,9 +577,10 @@ func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	decode.CharsetReader = charset.NewReaderLabel
 	err = decode.Decode(&vt)
 	if err != nil {
-		log.Println("error: &rt", err)
+		msgStr := fmt.Sprintf("Verto decode error: %s", err)
+		level.Warn(c.logger).Log("msg", msgStr)
 	}
-	level.Debug(logger).Log("[response]:", &vt)
+	level.Debug(c.logger).Log("[response]:", &vt)
 	for _, cc := range vt.Profile {
 		vertoStatus := 0
 		if cc.State.Text == "RUNNING" {
@@ -758,8 +754,9 @@ func (c *Collector) fetchMetric(metricDef *Metric) (float64, error) {
 			return 1, nil
 		}
 
-		log.Printf("[warning] time not in sync between system (%v) and FreeSWITCH (%v)\n",
+		msgStr := fmt.Sprintf("[warning] time not in sync between system (%v) and FreeSWITCH (%v)\n",
 			now.Unix(), value)
+		level.Info(c.logger).Log("msg", msgStr)
 
 		return 0, nil
 	}
@@ -844,7 +841,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		c.failedScrapes.Inc()
 		c.up.Set(0)
-		log.Println("[error]", err)
+		level.Warn(c.logger).Log("error", err)
 	} else {
 		c.up.Set(1)
 	}
