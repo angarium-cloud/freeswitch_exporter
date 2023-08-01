@@ -50,7 +50,7 @@ func main() {
 	level.Info(logger).Log("msg", "Starting freeswitch_exporter", "version", version.Info())
 	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
 
-	c, err := collector.NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
+	c, err := collector.New(*scrapeURI, *timeout, *password, *rtpEnable)
 
 	if err != nil {
 		panic(err)

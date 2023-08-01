@@ -169,8 +169,8 @@ var (
 	statusRegex = regexp.MustCompile(`(\d+) session\(s\) since startup\s+(\d+) session\(s\) - peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) per Sec out of max (\d+), peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) max\s+min idle cpu (\d+\.\d+)\/(\d+\.\d+)`)
 )
 
-// NewCollector processes uri, timeout and methods and returns a new Collector.
-func NewCollector(uri string, timeout time.Duration, password string, rtpEnable bool) (*Collector, error) {
+// New processes uri, timeout and methods and returns a new Collector.
+func New(uri string, timeout time.Duration, password string, rtpEnable bool) (*Collector, error) {
 	var c Collector
 
 	c.URI = uri
@@ -337,13 +337,13 @@ func (c *Collector) loadModuleMetrics(ch chan<- prometheus.Metric) error {
 		if err != nil {
 			return err
 		}
-		load_mudule := 0
+		loadModule := 0
 
 		if string(status) == "true" {
-			load_mudule = 1
+			loadModule = 1
 		}
 		level.Debug(logger).Log("module", m.Module, " load status: ", string(status))
-		fsLoadModules.WithLabelValues(m.Module).Set(float64(load_mudule))
+		fsLoadModules.WithLabelValues(m.Module).Set(float64(loadModule))
 	}
 	fsLoadModules.MetricVec.Collect(ch)
 	return nil
@@ -373,7 +373,7 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			status = 1
 		}
 		level.Debug(logger).Log("sofia ", gateway.Name, " status:", status)
-		fs_status, err := prometheus.NewConstMetric(
+		fsStatus, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_status", "freeswitch gateways status", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile, "context": gateway.Context, "scheme": gateway.Scheme}),
 			prometheus.GaugeValue,
 			float64(status),
@@ -383,9 +383,9 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- fs_status
+		ch <- fsStatus
 
-		call_in, err := prometheus.NewConstMetric(
+		callIn, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_call_in", "freeswitch gateway call-in", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile}),
 			prometheus.GaugeValue,
 			float64(gateway.CallsIn),
@@ -394,9 +394,9 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- call_in
+		ch <- callIn
 
-		call_out, err := prometheus.NewConstMetric(
+		callOut, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_call_out", "freeswitch gateway call-out", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile}),
 			prometheus.GaugeValue,
 			float64(gateway.CallsOut),
@@ -405,9 +405,9 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- call_out
+		ch <- callOut
 
-		failed_call_in, err := prometheus.NewConstMetric(
+		failedCallIn, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_failed_call_in", "freeswitch gateway failed-call-in", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile}),
 			prometheus.GaugeValue,
 			float64(gateway.FailedCallsIn),
@@ -416,9 +416,9 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- failed_call_in
+		ch <- failedCallIn
 
-		failed_call_out, err := prometheus.NewConstMetric(
+		failedCallOut, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_failed_call_out", "freeswitch gateway failed-call-out", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile}),
 			prometheus.GaugeValue,
 			float64(gateway.FailedCallsOut),
@@ -427,7 +427,7 @@ func (c *Collector) sofiaStatusMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- failed_call_out
+		ch <- failedCallOut
 
 		ping, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_sofia_gateway_ping", "freeswitch gateway ping", nil, prometheus.Labels{"name": gateway.Name, "proxy": gateway.Proxy, "profile": gateway.Profile}),
@@ -515,7 +515,7 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 	}
 	level.Debug(logger).Log("[response]:", &rt)
 	for _, ep := range rt.Row {
-		ep_load, err := prometheus.NewConstMetric(
+		endpointLoad, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_endpoint_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": ep.Type.Text, "name": ep.Name.Text, "ikey": ep.Ikey.Text}),
 			prometheus.GaugeValue,
 			float64(1),
@@ -525,7 +525,7 @@ func (c *Collector) endpointMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- ep_load
+		ch <- endpointLoad
 	}
 	return nil
 }
@@ -547,7 +547,7 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 	}
 	level.Debug(logger).Log("[response]:", &rt)
 	for _, cc := range rt.Row {
-		cc_load, err := prometheus.NewConstMetric(
+		codecLoad, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_codec_status", "freeswitch endpoint status", nil, prometheus.Labels{"type": cc.Type.Text, "name": cc.Name.Text, "ikey": cc.Ikey.Text}),
 			prometheus.GaugeValue,
 			float64(1),
@@ -557,7 +557,7 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 			return err
 		}
 
-		ch <- cc_load
+		ch <- codecLoad
 	}
 	return nil
 }
@@ -579,21 +579,21 @@ func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
 	}
 	level.Debug(logger).Log("[response]:", &vt)
 	for _, cc := range vt.Profile {
-		vt_status := 0
+		vertoStatus := 0
 		if cc.State.Text == "RUNNING" {
-			vt_status = 1
+			vertoStatus = 1
 		}
-		vt_load, err := prometheus.NewConstMetric(
+		vertoLoad, err := prometheus.NewConstMetric(
 			prometheus.NewDesc(namespace+"_verto_status", "freeswitch endpoint status", nil, prometheus.Labels{"name": cc.Name.Text, "type": cc.Type.Text, "data": cc.Data.Text}),
 			prometheus.GaugeValue,
-			float64(vt_status),
+			float64(vertoStatus),
 		)
 
 		if err != nil {
 			return err
 		}
 
-		ch <- vt_load
+		ch <- vertoLoad
 	}
 	return nil
 }
