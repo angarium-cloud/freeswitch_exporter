@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/angarium-cloud/freeswitch_exporter/collector"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -49,7 +50,7 @@ func main() {
 	level.Info(logger).Log("msg", "Starting freeswitch_exporter", "version", version.Info())
 	level.Info(logger).Log("msg", "Build context", "build_context", version.BuildContext())
 
-	c, err := NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
+	c, err := collector.NewCollector(*scrapeURI, *timeout, *password, *rtpEnable)
 
 	if err != nil {
 		panic(err)
