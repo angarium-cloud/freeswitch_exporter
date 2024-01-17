@@ -37,10 +37,11 @@ type Collector struct {
 	Password  string
 	rtpEnable bool
 
-	conn  net.Conn
-	input *bufio.Reader
-	url   *url.URL
-	mutex sync.Mutex
+	conn    net.Conn
+	input   *bufio.Reader
+	address string
+	scheme  string
+	mutex   sync.Mutex
 
 	logger        log.Logger
 	up            prometheus.Gauge
@@ -159,7 +160,6 @@ var (
 		{Name: "bridged_calls", Type: prometheus.GaugeValue, Help: "Number of bridged_calls active", Command: "api show bridged_calls as json"},
 		{Name: "registrations", Type: prometheus.GaugeValue, Help: "Number of registrations active", Command: "api show registrations as json"},
 		{Name: "current_channels", Type: prometheus.GaugeValue, Help: "Number of channels active", Command: "api show channels count as json"},
-		{Name: "uptime_seconds", Type: prometheus.GaugeValue, Help: "Uptime in seconds", Command: "api uptime s"},
 		{Name: "time_synced", Type: prometheus.GaugeValue, Help: "Is FreeSWITCH time in sync with exporter host time", Command: "api strepoch"},
 		{Name: "sessions_total", Type: prometheus.CounterValue, Help: "Number of sessions since startup", RegexIndex: 1},
 		{Name: "current_sessions", Type: prometheus.GaugeValue, Help: "Number of sessions active", RegexIndex: 2},
@@ -173,7 +173,11 @@ var (
 		{Name: "current_idle_cpu", Type: prometheus.GaugeValue, Help: "CPU idle", RegexIndex: 11},
 		{Name: "min_idle_cpu", Type: prometheus.GaugeValue, Help: "Minimum CPU idle", RegexIndex: 10},
 	}
-	statusRegex = regexp.MustCompile(`(\d+) session\(s\) since startup\s+(\d+) session\(s\) - peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) per Sec out of max (\d+), peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) max\s+min idle cpu (\d+\.\d+)\/(\d+\.\d+)`)
+	statusRegex   = regexp.MustCompile(`(\d+) session\(s\) since startup\s+(\d+) session\(s\) - peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) per Sec out of max (\d+), peak (\d+), last 5min (\d+)\s+(\d+) session\(s\) max\s+min idle cpu (\d+\.\d+)\/(\d+\.\d+)`)
+	uptimeSeconds = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "uptime_seconds"),
+		"Uptime in seconds",
+		[]string{"version"}, nil)
 )
 
 // New processes uri, timeout and methods and returns a new Collector.
@@ -193,7 +197,12 @@ func New(uri string, timeout time.Duration, password string, rtpEnable bool, log
 		return nil, fmt.Errorf("cannot parse URI: %w", err)
 	}
 
-	c.url = url
+	c.address = url.Host
+	c.scheme = url.Scheme
+
+	if c.scheme == "unix" {
+		c.address = url.Path
+	}
 
 	c.up = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
@@ -220,15 +229,9 @@ func New(uri string, timeout time.Duration, password string, rtpEnable bool, log
 func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 	c.totalScrapes.Inc()
 
-	address := c.url.Host
-
-	if c.url.Scheme == "unix" {
-		address = c.url.Path
-	}
-
 	var err error
 
-	c.conn, err = net.DialTimeout(c.url.Scheme, address, c.Timeout)
+	c.conn, err = net.DialTimeout(c.scheme, c.address, c.Timeout)
 
 	if err != nil {
 		return err
@@ -240,6 +243,10 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 	c.input = bufio.NewReader(c.conn)
 
 	if err = c.fsAuth(); err != nil {
+		return err
+	}
+
+	if err = c.scapeUptime(ch); err != nil {
 		return err
 	}
 
@@ -262,6 +269,7 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 	if err = c.endpointMetrics(ch); err != nil {
 		return err
 	}
+
 	if err = c.codecMetrics(ch); err != nil {
 		return err
 	}
@@ -280,6 +288,47 @@ func (c *Collector) scrape(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) variableRtpAudioMetrics(ch chan<- prometheus.Metric) error {
+	return nil
+}
+
+func (c *Collector) scapeUptime(ch chan<- prometheus.Metric) error {
+	response, err := c.fsCommand("api uptime s")
+	if err != nil {
+		return err
+	}
+
+	raw := string(response)
+	if raw[len(raw)-1:] == "\n" {
+		raw = raw[:len(raw)-1]
+	}
+
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("cannot read uptime: %w", err)
+	}
+
+	response, err = c.fsCommand("api version short")
+	if err != nil {
+		return err
+	}
+
+	version := string(response)
+	if version[len(version)-1:] == "\n" {
+		version = version[:len(version)-1]
+	}
+
+	metric, err := prometheus.NewConstMetric(
+		uptimeSeconds,
+		prometheus.GaugeValue,
+		value,
+		version,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	ch <- metric
 	return nil
 }
 
@@ -567,6 +616,15 @@ func (c *Collector) codecMetrics(ch chan<- prometheus.Metric) error {
 }
 
 func (c *Collector) vertoMetrics(ch chan<- prometheus.Metric) error {
+	status, err := c.fsCommand("api module_exists mod_verto")
+	if err != nil {
+		return err
+	}
+
+	if string(status) == "false" {
+		return nil
+	}
+
 	response, err := c.fsCommand("api verto xmlstatus")
 
 	if err != nil {
@@ -729,20 +787,6 @@ func (c *Collector) fetchMetric(metricDef *Metric) (float64, error) {
 		}
 
 		return r.Count, nil
-	case "uptime_seconds":
-		raw := string(response)
-
-		if raw[len(raw)-1:] == "\n" {
-			raw = raw[:len(raw)-1]
-		}
-
-		value, err := strconv.ParseFloat(raw, 64)
-
-		if err != nil {
-			return 0, fmt.Errorf("cannot read uptime: %w", err)
-		}
-
-		return value, nil
 	case "time_synced":
 		value, err := strconv.ParseInt(string(response), 10, 64)
 
@@ -835,18 +879,15 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-
-	err := c.scrape(ch)
-
-	if err != nil {
+	if err := c.scrape(ch); err != nil {
+		level.Error(c.logger).Log("msg", "Error scraping freeswitch", "err", err)
 		c.failedScrapes.Inc()
+		c.failedScrapes.Collect(ch)
 		c.up.Set(0)
-		level.Warn(c.logger).Log("error", err)
 	} else {
 		c.up.Set(1)
 	}
 
 	ch <- c.up
 	ch <- c.totalScrapes
-	ch <- c.failedScrapes
 }
