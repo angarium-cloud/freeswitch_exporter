@@ -1,16 +1,12 @@
-# build
-FROM golang:1.18 as builder
+ARG ARCH="amd64"
+ARG OS="linux"
+FROM quay.io/prometheus/busybox-${OS}-${ARCH}:latest
+LABEL maintainer="The Prometheus Authors <prometheus-developers@googlegroups.com>"
 
-WORKDIR /go/src
-COPY . /go/src/
-RUN CGO_ENABLED=0 go build -a -o freeswitch_exporter
+ARG ARCH="amd64"
+ARG OS="linux"
+COPY .build/${OS}-${ARCH}/freeswitch_exporter /bin/freeswitch_exporter
 
-# run
-FROM scratch
-
-COPY --from=builder /go/src/freeswitch_exporter /freeswitch_exporter
-
-LABEL author="ZhangLianjun <z0413j@outlook.com>,Florent CHAUVEAU <florentch@pm.me>"
-
+USER       nobody
+ENTRYPOINT ["/bin/freeswitch_exporter"]
 EXPOSE 9282
-ENTRYPOINT [ "/freeswitch_exporter" ]
